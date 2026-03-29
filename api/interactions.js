@@ -1,11 +1,12 @@
-import { InteractionType, InteractionResponseType, MessageFlags } from "discord-api-types/v10";
+import { InteractionType, InteractionResponseType } from "discord-api-types/v10";
 import { verifyKey } from "discord-interactions";
 
 const PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY;
 
-const leaderboard = {};
+const COMPONENTS_V2_FLAG = 1 << 15;
+const EPHEMERAL_FLAG = 1 << 6;
 
-const CHOICES = ["rock", "paper", "scissors"];
+const leaderboard = {};
 
 const BEATS = {
   rock: "scissors",
@@ -19,6 +20,21 @@ function getResult(a, b) {
   return "b";
 }
 
+function ephemeral(content) {
+  return {
+    type: InteractionResponseType.ChannelMessageWithSource,
+    data: {
+      flags: EPHEMERAL_FLAG | COMPONENTS_V2_FLAG,
+      components: [
+        {
+          type: 17,
+          components: [{ type: 10, content }],
+        },
+      ],
+    },
+  };
+}
+
 function buildLeaderboardComponents(guildId) {
   const board = leaderboard[guildId] || {};
   const sorted = Object.entries(board)
@@ -30,10 +46,7 @@ function buildLeaderboardComponents(guildId) {
       {
         type: 17,
         components: [
-          {
-            type: 10,
-            content: "## Leaderboard\nNo games played yet.",
-          },
+          { type: 10, content: "## Leaderboard\nNo games played yet." },
         ],
       },
     ];
@@ -41,8 +54,8 @@ function buildLeaderboardComponents(guildId) {
 
   const rows = sorted
     .map(([userId, stats], i) => {
-      const medal = i === 0 ? "**#1**" : i === 1 ? "**#2**" : i === 2 ? "**#3**" : `#${i + 1}`;
-      return `${medal} <@${userId}> — W: ${stats.wins} L: ${stats.losses} D: ${stats.draws}`;
+      const rank = i === 0 ? "**#1**" : i === 1 ? "**#2**" : i === 2 ? "**#3**" : `#${i + 1}`;
+      return `${rank} <@${userId}> — W: ${stats.wins} L: ${stats.losses} D: ${stats.draws}`;
     })
     .join("\n");
 
@@ -50,10 +63,7 @@ function buildLeaderboardComponents(guildId) {
     {
       type: 17,
       components: [
-        {
-          type: 10,
-          content: `## Leaderboard\n${rows}`,
-        },
+        { type: 10, content: `## Leaderboard\n${rows}` },
       ],
     },
   ];
@@ -71,24 +81,9 @@ function buildChallengeComponents(challengerId, opponentId) {
         {
           type: 1,
           components: [
-            {
-              type: 2,
-              style: 1,
-              label: "Rock",
-              custom_id: `rps_move:${challengerId}:${opponentId}:rock`,
-            },
-            {
-              type: 2,
-              style: 1,
-              label: "Paper",
-              custom_id: `rps_move:${challengerId}:${opponentId}:paper`,
-            },
-            {
-              type: 2,
-              style: 1,
-              label: "Scissors",
-              custom_id: `rps_move:${challengerId}:${opponentId}:scissors`,
-            },
+            { type: 2, style: 1, label: "Rock",     custom_id: `rps_move:${challengerId}:${opponentId}:rock`     },
+            { type: 2, style: 1, label: "Paper",    custom_id: `rps_move:${challengerId}:${opponentId}:paper`    },
+            { type: 2, style: 1, label: "Scissors", custom_id: `rps_move:${challengerId}:${opponentId}:scissors` },
           ],
         },
       ],
@@ -108,24 +103,9 @@ function buildChallengerPickComponents(challengerId, opponentId, opponentMove) {
         {
           type: 1,
           components: [
-            {
-              type: 2,
-              style: 1,
-              label: "Rock",
-              custom_id: `rps_challenger:${challengerId}:${opponentId}:${opponentMove}:rock`,
-            },
-            {
-              type: 2,
-              style: 1,
-              label: "Paper",
-              custom_id: `rps_challenger:${challengerId}:${opponentId}:${opponentMove}:paper`,
-            },
-            {
-              type: 2,
-              style: 1,
-              label: "Scissors",
-              custom_id: `rps_challenger:${challengerId}:${opponentId}:${opponentMove}:scissors`,
-            },
+            { type: 2, style: 1, label: "Rock",     custom_id: `rps_challenger:${challengerId}:${opponentId}:${opponentMove}:rock`     },
+            { type: 2, style: 1, label: "Paper",    custom_id: `rps_challenger:${challengerId}:${opponentId}:${opponentMove}:paper`    },
+            { type: 2, style: 1, label: "Scissors", custom_id: `rps_challenger:${challengerId}:${opponentId}:${opponentMove}:scissors` },
           ],
         },
       ],
@@ -134,15 +114,13 @@ function buildChallengerPickComponents(challengerId, opponentId, opponentMove) {
 }
 
 function buildResultComponents(challengerId, challengerMove, opponentId, opponentMove, result) {
-  const moveLabel = { rock: "Rock", paper: "Paper", scissors: "Scissors" };
-  let outcome;
-  if (result === "draw") {
-    outcome = "It's a **draw**!";
-  } else if (result === "a") {
-    outcome = `<@${challengerId}> wins!`;
-  } else {
-    outcome = `<@${opponentId}> wins!`;
-  }
+  const label = { rock: "Rock", paper: "Paper", scissors: "Scissors" };
+  const outcome =
+    result === "draw"
+      ? "It's a **draw**!"
+      : result === "a"
+      ? `<@${challengerId}> wins!`
+      : `<@${opponentId}> wins!`;
 
   return [
     {
@@ -150,7 +128,7 @@ function buildResultComponents(challengerId, challengerMove, opponentId, opponen
       components: [
         {
           type: 10,
-          content: `## Rock Paper Scissors — Result\n<@${challengerId}> played **${moveLabel[challengerMove]}**\n<@${opponentId}> played **${moveLabel[opponentMove]}**\n\n${outcome}`,
+          content: `## Rock Paper Scissors — Result\n<@${challengerId}> played **${label[challengerMove]}**\n<@${opponentId}> played **${label[opponentMove]}**\n\n${outcome}`,
         },
       ],
     },
@@ -195,40 +173,13 @@ export default async function handler(req, res) {
       const targetUser = interaction.data.options?.find((o) => o.name === "user")?.value;
       const challengerId = interaction.member?.user?.id || interaction.user?.id;
 
-      if (!targetUser) {
-        return res.json({
-          type: InteractionResponseType.ChannelMessageWithSource,
-          data: {
-            flags: MessageFlags.Ephemeral,
-            components: [
-              {
-                type: 17,
-                components: [{ type: 10, content: "You must mention a user to challenge." }],
-              },
-            ],
-          },
-        });
-      }
-
-      if (targetUser === challengerId) {
-        return res.json({
-          type: InteractionResponseType.ChannelMessageWithSource,
-          data: {
-            flags: MessageFlags.Ephemeral,
-            components: [
-              {
-                type: 17,
-                components: [{ type: 10, content: "You cannot challenge yourself." }],
-              },
-            ],
-          },
-        });
-      }
+      if (!targetUser) return res.json(ephemeral("You must mention a user to challenge."));
+      if (targetUser === challengerId) return res.json(ephemeral("You cannot challenge yourself."));
 
       return res.json({
         type: InteractionResponseType.ChannelMessageWithSource,
         data: {
-          flags: MessageFlags.IsComponentsV2,
+          flags: COMPONENTS_V2_FLAG,
           components: buildChallengeComponents(challengerId, targetUser),
         },
       });
@@ -238,7 +189,7 @@ export default async function handler(req, res) {
       return res.json({
         type: InteractionResponseType.ChannelMessageWithSource,
         data: {
-          flags: MessageFlags.IsComponentsV2,
+          flags: COMPONENTS_V2_FLAG,
           components: buildLeaderboardComponents(guildId),
         },
       });
@@ -250,49 +201,30 @@ export default async function handler(req, res) {
     const userId = interaction.member?.user?.id || interaction.user?.id;
 
     if (customId.startsWith("rps_move:")) {
-      const [, challengerId, opponentId, opponentMove] = customId.split(":");
+      const parts = customId.split(":");
+      const challengerId = parts[1];
+      const opponentId = parts[2];
+      const opponentMove = parts[3];
 
-      if (userId !== opponentId) {
-        return res.json({
-          type: InteractionResponseType.ChannelMessageWithSource,
-          data: {
-            flags: MessageFlags.Ephemeral,
-            components: [
-              {
-                type: 17,
-                components: [{ type: 10, content: "This challenge is not for you." }],
-              },
-            ],
-          },
-        });
-      }
+      if (userId !== opponentId) return res.json(ephemeral("This challenge is not for you."));
 
       return res.json({
         type: InteractionResponseType.UpdateMessage,
         data: {
-          flags: MessageFlags.IsComponentsV2,
+          flags: COMPONENTS_V2_FLAG,
           components: buildChallengerPickComponents(challengerId, opponentId, opponentMove),
         },
       });
     }
 
     if (customId.startsWith("rps_challenger:")) {
-      const [, challengerId, opponentId, opponentMove, challengerMove] = customId.split(":");
+      const parts = customId.split(":");
+      const challengerId = parts[1];
+      const opponentId = parts[2];
+      const opponentMove = parts[3];
+      const challengerMove = parts[4];
 
-      if (userId !== challengerId) {
-        return res.json({
-          type: InteractionResponseType.ChannelMessageWithSource,
-          data: {
-            flags: MessageFlags.Ephemeral,
-            components: [
-              {
-                type: 17,
-                components: [{ type: 10, content: "This challenge is not for you." }],
-              },
-            ],
-          },
-        });
-      }
+      if (userId !== challengerId) return res.json(ephemeral("This challenge is not for you."));
 
       const result = getResult(challengerMove, opponentMove);
 
@@ -310,7 +242,7 @@ export default async function handler(req, res) {
       return res.json({
         type: InteractionResponseType.UpdateMessage,
         data: {
-          flags: MessageFlags.IsComponentsV2,
+          flags: COMPONENTS_V2_FLAG,
           components: buildResultComponents(challengerId, challengerMove, opponentId, opponentMove, result),
         },
       });
