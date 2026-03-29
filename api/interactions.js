@@ -1,18 +1,51 @@
 import { InteractionType, InteractionResponseType } from "discord-api-types/v10";
 import { verifyKey } from "discord-interactions";
+import { MongoClient } from "mongodb";
 
 const PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY;
+const MONGODB_URI = process.env.MONGODB_URI;
 
 const COMPONENTS_V2_FLAG = 1 << 15;
 const EPHEMERAL_FLAG = 1 << 6;
-
-const leaderboard = {};
 
 const BEATS = {
   rock: "scissors",
   paper: "rock",
   scissors: "paper",
 };
+
+let cachedClient = null;
+
+async function getCollection() {
+  if (!cachedClient) {
+    cachedClient = new MongoClient(MONGODB_URI);
+    await cachedClient.connect();
+  }
+  return cachedClient.db("rps").collection("leaderboard");
+}
+
+async function getStats(guildId, userId) {
+  const col = await getCollection();
+  return await col.findOne({ guildId, userId }) || { wins: 0, losses: 0, draws: 0 };
+}
+
+async function updateStats(guildId, userId, outcome) {
+  const col = await getCollection();
+  await col.updateOne(
+    { guildId, userId },
+    { $inc: { [outcome]: 1 } },
+    { upsert: true }
+  );
+}
+
+async function getLeaderboard(guildId) {
+  const col = await getCollection();
+  return await col
+    .find({ guildId })
+    .sort({ wins: -1 })
+    .limit(10)
+    .toArray();
+}
 
 function getResult(a, b) {
   if (a === b) return "draw";
@@ -35,13 +68,8 @@ function ephemeral(content) {
   };
 }
 
-function buildLeaderboardComponents(guildId) {
-  const board = leaderboard[guildId] || {};
-  const sorted = Object.entries(board)
-    .sort((x, y) => (y[1].wins - y[1].losses) - (x[1].wins - x[1].losses))
-    .slice(0, 10);
-
-  if (sorted.length === 0) {
+function buildLeaderboardComponents(entries) {
+  if (entries.length === 0) {
     return [
       {
         type: 17,
@@ -52,10 +80,11 @@ function buildLeaderboardComponents(guildId) {
     ];
   }
 
-  const rows = sorted
-    .map(([userId, stats], i) => {
-      const rank = i === 0 ? "**#1**" : i === 1 ? "**#2**" : i === 2 ? "**#3**" : `#${i + 1}`;
-      return `${rank} <@${userId}> — W: ${stats.wins} L: ${stats.losses} D: ${stats.draws}`;
+  const rows = entries
+    .map((entry, i) => {
+      const rank = `**#${i + 1}**`;
+      const score = entry.wins - entry.losses;
+      return `${rank} <@\u200b${entry.userId}> \`${score}\``;
     })
     .join("\n");
 
@@ -135,12 +164,6 @@ function buildResultComponents(challengerId, challengerMove, opponentId, opponen
   ];
 }
 
-function updateStats(guildId, userId, outcome) {
-  if (!leaderboard[guildId]) leaderboard[guildId] = {};
-  if (!leaderboard[guildId][userId]) leaderboard[guildId][userId] = { wins: 0, losses: 0, draws: 0 };
-  leaderboard[guildId][userId][outcome]++;
-}
-
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).end("Method Not Allowed");
@@ -186,11 +209,12 @@ export default async function handler(req, res) {
     }
 
     if (name === "leaderboard") {
+      const entries = await getLeaderboard(guildId);
       return res.json({
         type: InteractionResponseType.ChannelMessageWithSource,
         data: {
           flags: COMPONENTS_V2_FLAG,
-          components: buildLeaderboardComponents(guildId),
+          components: buildLeaderboardComponents(entries),
         },
       });
     }
@@ -229,14 +253,14 @@ export default async function handler(req, res) {
       const result = getResult(challengerMove, opponentMove);
 
       if (result === "draw") {
-        updateStats(guildId, challengerId, "draws");
-        updateStats(guildId, opponentId, "draws");
+        await updateStats(guildId, challengerId, "draws");
+        await updateStats(guildId, opponentId, "draws");
       } else if (result === "a") {
-        updateStats(guildId, challengerId, "wins");
-        updateStats(guildId, opponentId, "losses");
+        await updateStats(guildId, challengerId, "wins");
+        await updateStats(guildId, opponentId, "losses");
       } else {
-        updateStats(guildId, challengerId, "losses");
-        updateStats(guildId, opponentId, "wins");
+        await updateStats(guildId, challengerId, "losses");
+        await updateStats(guildId, opponentId, "wins");
       }
 
       return res.json({
