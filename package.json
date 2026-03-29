@@ -1,0 +1,13 @@
+{
+  "name": "rps-discord-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "register": "node register.js"
+  },
+  "dependencies": {
+    "discord-api-types": "^0.37.97",
+    "discord-interactions": "^3.4.0"
+  }
+}
