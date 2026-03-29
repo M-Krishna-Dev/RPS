@@ -43,8 +43,16 @@ async function getLeaderboard(guildId) {
   return await col
     .find({ guildId })
     .sort({ wins: -1 })
-    .limit(10)
     .toArray();
+}
+
+async function getUserRank(guildId, userId) {
+  const all = await getLeaderboard(guildId);
+  const idx = all.findIndex((e) => e.userId === userId);
+  if (idx === -1) return null;
+  const entry = all[idx];
+  const score = (entry.wins || 0) - (entry.losses || 0);
+  return { rank: idx + 1, score };
 }
 
 function getResult(a, b) {
@@ -68,21 +76,29 @@ function ephemeral(content) {
   };
 }
 
-function buildLeaderboardComponents(entries) {
-  if (entries.length === 0) {
+function buildLeaderboardComponents(allEntries, userRank) {
+  const top10 = allEntries.slice(0, 10);
+
+  const footerText = userRank
+    ? `-# You are ranked #${userRank.rank} with a score of \`${userRank.score}\`.`
+    : `-# You are not ranked yet.`;
+
+  if (top10.length === 0) {
     return [
       {
         type: 17,
         components: [
           { type: 10, content: "## Leaderboard\nNo games played yet." },
+          { type: 14, divider: true },
+          { type: 10, content: footerText },
         ],
       },
     ];
   }
 
-  const rows = entries
+  const rows = top10
     .map((entry, i) => {
-      const score = entry.wins - entry.losses;
+      const score = (entry.wins || 0) - (entry.losses || 0);
       return `${i + 1}. <@${entry.userId}> \`${score}\``;
     })
     .join('\n');
@@ -91,7 +107,11 @@ function buildLeaderboardComponents(entries) {
     {
       type: 17,
       components: [
-        { type: 10, content: `## Leaderboard\n${rows}` },
+        { type: 10, content: `## Leaderboard` },
+        { type: 14, divider: true },
+        { type: 10, content: rows },
+        { type: 14, divider: true },
+        { type: 10, content: footerText },
       ],
     },
   ];
@@ -208,12 +228,14 @@ export default async function handler(req, res) {
     }
 
     if (name === "leaderboard") {
-      const entries = await getLeaderboard(guildId);
+      const userId = interaction.member?.user?.id || interaction.user?.id;
+      const allEntries = await getLeaderboard(guildId);
+      const userRank = await getUserRank(guildId, userId);
       return res.json({
         type: InteractionResponseType.ChannelMessageWithSource,
         data: {
           flags: COMPONENTS_V2_FLAG,
-          components: buildLeaderboardComponents(entries),
+          components: buildLeaderboardComponents(allEntries, userRank),
           allowed_mentions: { parse: [] },
         },
       });
