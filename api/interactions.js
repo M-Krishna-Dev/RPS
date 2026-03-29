@@ -24,24 +24,24 @@ async function getCollection() {
   return cachedClient.db("rps").collection("leaderboard");
 }
 
-async function getStats(guildId, userId) {
-  const col = await getCollection();
-  return await col.findOne({ guildId, userId }) || { wins: 0, losses: 0, draws: 0 };
-}
-
-async function updateStats(guildId, userId, outcome) {
+async function incrementWins(guildId, userId) {
   const col = await getCollection();
   await col.updateOne(
     { guildId, userId },
-    { $inc: { [outcome]: 1 } },
+    { $inc: { wins: 1 } },
     { upsert: true }
   );
+}
+
+async function removeIfZeroWins(guildId, userId) {
+  const col = await getCollection();
+  await col.deleteOne({ guildId, userId, wins: { $lte: 0 } });
 }
 
 async function getLeaderboard(guildId) {
   const col = await getCollection();
   return await col
-    .find({ guildId })
+    .find({ guildId, wins: { $gt: 0 } })
     .sort({ wins: -1 })
     .toArray();
 }
@@ -50,9 +50,12 @@ async function getUserRank(guildId, userId) {
   const all = await getLeaderboard(guildId);
   const idx = all.findIndex((e) => e.userId === userId);
   if (idx === -1) return null;
-  const entry = all[idx];
-  const score = (entry.wins || 0) - (entry.losses || 0);
-  return { rank: idx + 1, score };
+  return { rank: idx + 1, score: all[idx].wins };
+}
+
+async function removeUserFromGuild(guildId, userId) {
+  const col = await getCollection();
+  await col.deleteOne({ guildId, userId });
 }
 
 function getResult(a, b) {
@@ -97,17 +100,14 @@ function buildLeaderboardComponents(allEntries, userRank) {
   }
 
   const rows = top10
-    .map((entry, i) => {
-      const score = (entry.wins || 0) - (entry.losses || 0);
-      return `${i + 1}. <@${entry.userId}> \`${score}\``;
-    })
-    .join('\n');
+    .map((entry, i) => `${i + 1}. <@${entry.userId}> \`${entry.wins}\``)
+    .join("\n");
 
   return [
     {
       type: 17,
       components: [
-        { type: 10, content: `## Leaderboard` },
+        { type: 10, content: "## Leaderboard" },
         { type: 14, divider: true },
         { type: 10, content: rows },
         { type: 14, divider: true },
@@ -208,6 +208,14 @@ export default async function handler(req, res) {
 
   const guildId = interaction.guild_id;
 
+  if (interaction.type === InteractionType.GuildMemberRemove) {
+    const userId = interaction.data?.user?.id;
+    if (userId && guildId) {
+      await removeUserFromGuild(guildId, userId);
+    }
+    return res.status(200).end();
+  }
+
   if (interaction.type === InteractionType.ApplicationCommand) {
     const { name } = interaction.data;
 
@@ -274,15 +282,10 @@ export default async function handler(req, res) {
 
       const result = getResult(challengerMove, opponentMove);
 
-      if (result === "draw") {
-        await updateStats(guildId, challengerId, "draws");
-        await updateStats(guildId, opponentId, "draws");
-      } else if (result === "a") {
-        await updateStats(guildId, challengerId, "wins");
-        await updateStats(guildId, opponentId, "losses");
-      } else {
-        await updateStats(guildId, challengerId, "losses");
-        await updateStats(guildId, opponentId, "wins");
+      if (result === "a") {
+        await incrementWins(guildId, challengerId);
+      } else if (result === "b") {
+        await incrementWins(guildId, opponentId);
       }
 
       return res.json({
