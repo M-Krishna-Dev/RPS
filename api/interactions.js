@@ -82,11 +82,10 @@ function buildLeaderboardComponents(entries) {
 
   const rows = entries
     .map((entry, i) => {
-      const rank = `**#${i + 1}**`;
       const score = entry.wins - entry.losses;
-      return `${rank} <@\u200b${entry.userId}> \`${score}\``;
+      return `${i + 1}. <@${entry.userId}> \`${score}\``;
     })
-    .join("\n");
+    .join('\n');
 
   return [
     {
@@ -215,6 +214,7 @@ export default async function handler(req, res) {
         data: {
           flags: COMPONENTS_V2_FLAG,
           components: buildLeaderboardComponents(entries),
+          allowed_mentions: { parse: [] },
         },
       });
     }
