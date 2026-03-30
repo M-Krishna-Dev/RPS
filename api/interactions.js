@@ -100,7 +100,7 @@ function buildLeaderboardComponents(allEntries, userRank) {
   }
 
   const rows = top10
-    .map((entry, i) => `${i + 1}. <@${entry.userId}> ・ \`${entry.wins}\``)
+    .map((entry, i) => `${i + 1}. <@${entry.userId}>・\`${entry.wins}\``)
     .join("\n");
 
   return [
